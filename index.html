@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Trombone Tuner & Metronome</title>
+  <style>
+    /* --- 2000s Hacking Style (Dark Mode) --- */
+    :root {
+      --bg-color: #050a05;
+      --text-green: #00ff41;
+      --border-green: #008f11;
+      --sharp-pink: #ff1493;
+      --flat-orange: #ff8c00;
+      --ui-font: 'Courier New', Courier, monospace;
+    }
+
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background-color: var(--bg-color);
+      color: var(--text-green);
+      font-family: var(--ui-font);
+      overflow: hidden;
+      touch-action: none;
+    }
+
+    * { box-sizing: border-box; }
+
+    /* Metronome Button & Menu */
+    #metro-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      z-index: 10;
+    }
+
+    #metro-btn {
+      display: inline-block;
+      background: var(--bg-color);
+      color: var(--text-green);
+      border: 1px solid var(--border-green);
+      padding: 10px 20px;
+      margin: 10px;
+      font-size: 1.2rem;
+      cursor: pointer;
+      font-family: inherit;
+      box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);
+      user-select: none;
+    }
+
+    #metro-menu {
+      background: rgba(5, 10, 5, 0.95);
+      border-bottom: 2px solid var(--border-green);
+      padding: 20px;
+      transform: translateY(-100%);
+      transition: transform 0.3s ease-out;
+      position: absolute;
+      width: 100%;
+      top: 0;
+      box-shadow: 0 5px 15px rgba(0, 255, 65, 0.1);
+    }
+    #metro-menu.open {
+      transform: translateY(0);
+    }
+    .menu-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 15px;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .hacker-btn {
+      background: transparent;
+      color: var(--text-green);
+      border: 1px solid var(--border-green);
+      padding: 5px 10px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .hacker-btn:active { background: var(--border-green); color: #000; }
+    .hacker-input {
+      background: transparent;
+      color: var(--text-green);
+      border: 1px solid var(--border-green);
+      padding: 5px;
+      width: 60px;
+      text-align: center;
+      font-family: inherit;
+    }
+
+    /* Accent Bars */
+    #accent-bars {
+      display: flex;
+      gap: 5px;
+      margin-top: 10px;
+    }
+    .accent-bar {
+      width: 30px;
+      height: 40px;
+      border: 1px solid var(--border-green);
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .accent-bar.active { background: var(--text-green); }
+
+    /* Tuner Canvas (The Orb) */
+    #tuner-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    canvas {
+      display: block;
+    }
+
+    /* Side Flashes */
+    .flash-side {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 30px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.1s ease-out;
+    }
+    #flash-left { left: 0; background: linear-gradient(to right, rgba(0,255,65,0.5), transparent); }
+    #flash-right { right: 0; background: linear-gradient(to left, rgba(0,255,65,0.5), transparent); }
+
+    /* Dev Menu */
+    #dev-menu {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      border: 1px dashed var(--border-green);
+      padding: 10px;
+      background: rgba(0,0,0,0.8);
+      font-size: 0.8rem;
+    }
+    #dev-menu h4 { margin: 0 0 5px 0; }
+  </style>
+</head>
+<body>
+
+  <!-- Metronome Interface -->
+  <div id="metro-container">
+    <div id="metro-menu">
+      <div style="text-align: right;"><button class="hacker-btn" id="close-menu-btn">X</button></div>
+      <div class="menu-row">
+        <span>SPEED (BPM):</span>
+        <button class="hacker-btn" onclick="changeBpm(-5)">-5</button>
+        <button class="hacker-btn" onclick="changeBpm(-1)">-1</button>
+        <input type="number" id="bpm-input" class="hacker-input" value="120" onchange="setBpm(this.value)">
+        <button class="hacker-btn" onclick="changeBpm(1)">+1</button>
+        <button class="hacker-btn" onclick="changeBpm(5)">+5</button>
+      </div>
+      <div class="menu-row">
+        <span>TIME SIG:</span>
+        <button class="hacker-btn" onclick="setTimeSig(3,4)">3/4</button>
+        <button class="hacker-btn" onclick="setTimeSig(4,4)">4/4</button>
+        <button class="hacker-btn" onclick="setTimeSig(6,8)">6/8</button>
+        <input type="text" id="custom-sig" class="hacker-input" value="4/4" placeholder="e.g. 3/2" style="width: 80px;" onchange="parseCustomSig(this.value)">
+      </div>
+      <div class="menu-row">
+        <span>ACCENTS (Tap to toggle):</span>
+        <div id="accent-bars"></div>
+      </div>
+      <div class="menu-row">
+        <label><input type="checkbox" id="flash-toggle" checked> Visual Edge Flash</label>
+      </div>
+    </div>
+    <!-- Sliding Button -->
+    <button id="metro-btn">[ METRONOME: 120 BPM - OFF ]</button>
+  </div>
+
+  <!-- Edge Flashes -->
+  <div id="flash-left" class="flash-side"></div>
+  <div id="flash-right" class="flash-side"></div>
+
+  <!-- Tuner Interface -->
+  <div id="tuner-screen">
+    <canvas id="orb-canvas"></canvas>
+  </div>
+
+  <!-- Dev Menu -->
+  <div id="dev-menu">
+    <h4>> DEV_TESTER_OSC</h4>
+    <select id="dev-note" class="hacker-input" style="width:100px; margin-bottom: 5px;">
+      <option value="116.54">Bb2 (116Hz)</option>
+      <option value="174.61">F3 (174Hz)</option>
+      <option value="233.08">Bb3 (233Hz)</option>
+      <option value="440">A4 (440Hz)</option>
+    </select><br>
+    CENTS: <span id="dev-cents-disp">0</span><br>
+    <input type="range" id="dev-cents" min="-50" max="50" value="0" oninput="document.getElementById('dev-cents-disp').innerText = this.value; updateDevTone();"><br>
+    <button id="dev-play" class="hacker-btn" style="margin-top: 5px;">PLAY TONE</button>
+  </div>
+
+<script>
+// --- GLOBALS & AUDIO CONTEXT ---
+let audioCtx, analyser, micStream;
+let isAudioInitialized = false;
+
+// Metronome state
+let isPlaying = false;
+let bpm = 120;
+let beatsPerBar = 4;
+let beatNoteValue = 4;
+let accents = [true, false, false, false];
+let nextNoteTime = 0.0;
+let currentBeat = 0;
+let lookahead = 25.0; // ms
+let scheduleAheadTime = 0.1; // s
+let timerID;
+const flashLeft = document.getElementById('flash-left');
+const flashRight = document.getElementById('flash-right');
+
+// Tuner state
+let currentNote = "";
+let currentCents = 0;
+let isNoteActive = false;
+let perfectTuneTimer = 0;
+
+// Trombone friendly (flats) note mapping
+const noteStrings = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+
+// --- INITIALIZATION ---
+function initAudio() {
+  if (isAudioInitialized) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  isAudioInitialized = true;
+  
+  // Try to get Mic input
+  navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+    micStream = stream;
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    const source = audioCtx.createMediaStreamSource(stream);
+    source.connect(analyser);
+    updatePitch(); // start tuner loop
+  }).catch(err => {
+    alert("Microphone access needed for the tuner to work!\n" + err);
+  });
+}
+
+// User interaction unlocks audio context (browser requirement)
+document.body.addEventListener('pointerdown', initAudio, { once: true });
+
+// --- METRONOME LOGIC ---
+function playClick(time, isAccent) {
+  const osc = audioCtx.createOscillator();
+  const envelope = audioCtx.createGain();
+  osc.connect(envelope);
+  envelope.connect(audioCtx.destination);
+  
+  // Accent = higher pitch
+  osc.frequency.value = isAccent ? 1200 : 800;
+  envelope.gain.value = 1;
+  envelope.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
+  osc.start(time);
+  osc.stop(time + 0.1);
+
+  // Trigger visual flash synchronized with audio
+  if (document.getElementById('flash-toggle').checked) {
+    const delay = (time - audioCtx.currentTime) * 1000;
+    setTimeout(() => {
+      flashLeft.style.opacity = '1';
+      flashRight.style.opacity = '1';
+      setTimeout(() => {
+        flashLeft.style.opacity = '0';
+        flashRight.style.opacity = '0';
+      }, 100); // quick fade out
+    }, Math.max(0, delay));
+  }
+}
+
+function nextNote() {
+  const secondsPerBeat = 60.0 / bpm;
+  nextNoteTime += secondsPerBeat;
+  currentBeat++;
+  if (currentBeat >= beatsPerBar) {
+    currentBeat = 0;
+  }
+}
+
+function scheduler() {
+  while (nextNoteTime < audioCtx.currentTime + scheduleAheadTime) {
+    playClick(nextNoteTime, accents[currentBeat]);
+    nextNote();
+  }
+  timerID = setTimeout(scheduler, lookahead);
+}
+
+// --- METRONOME UI LOGIC ---
+const metroBtn = document.getElementById('metro-btn');
+const metroMenu = document.getElementById('metro-menu');
+
+// Drag down functionality for the button
+let startY = 0;
+let isDragging = false;
+metroBtn.addEventListener('pointerdown', (e) => {
+  startY = e.clientY;
+  isDragging = true;
+});
+window.addEventListener('pointermove', (e) => {
+  if(!isDragging) return;
+  if(e.clientY - startY > 30) {
+    metroMenu.classList.add('open');
+    isDragging = false;
+  }
+});
+window.addEventListener('pointerup', (e) => {
+  if (isDragging) {
+    // If it was just a click (no drag), toggle metronome
+    if (Math.abs(e.clientY - startY) < 10) {
+      toggleMetronome();
+    }
+  }
+  isDragging = false;
+});
+document.getElementById('close-menu-btn').addEventListener('click', () => {
+  metroMenu.classList.remove('open');
+});
+
+function toggleMetronome() {
+  if(!isAudioInitialized) initAudio();
+  isPlaying = !isPlaying;
+  if (isPlaying) {
+    currentBeat = 0;
+    nextNoteTime = audioCtx.currentTime + 0.05;
+    scheduler();
+    updateBtnText();
+  } else {
+    clearTimeout(timerID);
+    updateBtnText();
+  }
+}
+
+function updateBtnText() {
+  metroBtn.innerText = `[ METRONOME: ${bpm} BPM - ${isPlaying ? 'ON' : 'OFF'} ]`;
+}
+
+function changeBpm(amount) { setBpm(parseInt(bpm) + amount); }
+function setBpm(val) {
+  bpm = Math.max(20, Math.min(300, parseInt(val) || 120));
+  document.getElementById('bpm-input').value = bpm;
+  updateBtnText();
+}
+
+function renderAccentBars() {
+  const container = document.getElementById('accent-bars');
+  container.innerHTML = '';
+  // Adjust array size
+  while(accents.length < beatsPerBar) accents.push(false);
+  accents = accents.slice(0, beatsPerBar);
+
+  for(let i=0; i<beatsPerBar; i++) {
+    const bar = document.createElement('div');
+    bar.className = 'accent-bar' + (accents[i] ? ' active' : '');
+    bar.onclick = () => {
+      accents[i] = !accents[i];
+      renderAccentBars();
+    };
+    container.appendChild(bar);
+  }
+}
+
+function setTimeSig(num, den) {
+  beatsPerBar = num;
+  beatNoteValue = den;
+  document.getElementById('custom-sig').value = `${num}/${den}`;
+  renderAccentBars();
+}
+
+function parseCustomSig(val) {
+  const parts = val.split('/');
+  if(parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+    setTimeSig(parseInt(parts[0]), parseInt(parts[1]));
+  }
+}
+// Init UI
+renderAccentBars();
+
+
+// --- PITCH DETECTION (Auto-correlation) ---
+function autoCorrelate(buf, sampleRate) {
+  let SIZE = buf.length;
+  let rms = 0;
+  for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
+  rms = Math.sqrt(rms / SIZE);
+  if (rms < 0.01) return -1; // Not enough signal
+
+  let r1 = 0, r2 = SIZE - 1, thres = 0.2;
+  for (let i = 0; i < SIZE / 2; i++) if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+  for (let i = 1; i < SIZE / 2; i++) if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
+
+  buf = buf.slice(r1, r2);
+  SIZE = buf.length;
+
+  let c = new Array(SIZE).fill(0);
+  for (let i = 0; i < SIZE; i++) {
+    for (let j = 0; j < SIZE - i; j++) c[i] = c[i] + buf[j] * buf[j + i];
+  }
+
+  let d = 0; while (c[d] > c[d + 1]) d++;
+  let maxval = -1, maxpos = -1;
+  for (let i = d; i < SIZE; i++) {
+    if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
+  }
+  let T0 = maxpos;
+  let x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1];
+  let a = (x1 + x3 - 2 * x2) / 2;
+  let b = (x3 - x1) / 2;
+  if (a) T0 = T0 - b / (2 * a);
+  return sampleRate / T0;
+}
+
+function updatePitch() {
+  requestAnimationFrame(updatePitch);
+  if (!analyser || devOscNode) return; // if dev tone is playing, ignore mic
+
+  const buf = new Float32Array(2048);
+  analyser.getFloatTimeDomainData(buf);
+  const ac = autoCorrelate(buf, audioCtx.sampleRate);
+  
+  processFrequency(ac);
+}
+
+function processFrequency(freq) {
+  if (freq === -1) {
+    isNoteActive = false;
+  } else {
+    isNoteActive = true;
+    const noteNum = Math.round(12 * (Math.log(freq / 440) / Math.log(2))) + 69;
+    const expectedFreq = 440 * Math.pow(2, (noteNum - 69) / 12);
+    currentNote = noteStrings[noteNum % 12];
+    currentCents = Math.floor(1200 * Math.log(freq / expectedFreq) / Math.log(2));
+  }
+}
+
+// --- CANVAS ORB RENDERING ---
+const canvas = document.getElementById('orb-canvas');
+const ctx = canvas.getContext('2d');
+let cw, ch;
+function resize() {
+  cw = canvas.width = window.innerWidth;
+  ch = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+function lerpColor(r1, g1, b1, r2, g2, b2, t) {
+  return `rgb(${Math.floor(r1 + (r2 - r1) * t)}, ${Math.floor(g1 + (g2 - g1) * t)}, ${Math.floor(b1 + (b2 - b1) * t)})`;
+}
+
+let animRings = [];
+
+function drawOrb() {
+  requestAnimationFrame(drawOrb);
+  ctx.clearRect(0, 0, cw, ch);
+  
+  const cx = cw / 2;
+  const cy = ch / 2;
+  const baseRadius = Math.min(cw, ch) * 0.25;
+  
+  if (!isNoteActive) {
+    // Idle state
+    ctx.beginPath();
+    ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = '#113311';
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    
+    ctx.font = '20px var(--ui-font)';
+    ctx.fillStyle = '#00ff41';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText("WAITING FOR SIGNAL...", cx, cy);
+    perfectTuneTimer = 0;
+    return;
+  }
+
+  // Active state calculations
+  let t = Math.min(1, Math.abs(currentCents) / 50); // 0 = perfect tune, 1 = 50+ cents off
+  let sharpColor = lerpColor(0, 255, 0, 255, 20, 147, t); // Green to Pink
+  let flatColor = lerpColor(0, 255, 0, 255, 140, 0, t);   // Green to Orange
+
+  // Draw Top Half (Sharp)
+  ctx.beginPath();
+  ctx.arc(cx, cy, baseRadius, Math.PI, 0);
+  ctx.lineWidth = 20;
+  ctx.strokeStyle = (currentCents > 0) ? sharpColor : '#113311';
+  ctx.stroke();
+
+  // Draw Bottom Half (Flat)
+  ctx.beginPath();
+  ctx.arc(cx, cy, baseRadius, 0, Math.PI);
+  ctx.lineWidth = 20;
+  ctx.strokeStyle = (currentCents < 0) ? flatColor : '#113311';
+  ctx.stroke();
+  
+  // Perfect Tune Animation Logic
+  if (Math.abs(currentCents) <= 5) {
+    perfectTuneTimer++;
+    if(perfectTuneTimer % 20 === 0) { // spawn a ring
+      animRings.push({ radius: baseRadius, alpha: 1 });
+    }
+  } else {
+    perfectTuneTimer = 0;
+  }
+
+  // Draw Rings
+  for(let i = animRings.length - 1; i >= 0; i--) {
+    let r = animRings[i];
+    ctx.beginPath();
+    ctx.arc(cx, cy, r.radius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(0, 255, 0, ${r.alpha})`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    r.radius += 2;
+    r.alpha -= 0.02;
+    if (r.alpha <= 0) animRings.splice(i, 1);
+  }
+
+  // Draw Text
+  ctx.font = 'bold 80px var(--ui-font)';
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(currentNote, cx, cy - 10);
+  
+  ctx.font = '20px var(--ui-font)';
+  let centText = (currentCents > 0 ? "+" : "") + currentCents + " CENTS";
+  ctx.fillStyle = (Math.abs(currentCents) <= 5) ? '#00ff41' : '#aaa';
+  ctx.fillText(centText, cx, cy + 40);
+}
+drawOrb();
+
+// --- DEV MENU OSCILLATOR ---
+let devOscNode = null;
+const devPlayBtn = document.getElementById('dev-play');
+
+function updateDevTone() {
+  if (devOscNode) {
+    const baseFreq = parseFloat(document.getElementById('dev-note').value);
+    const centsOffset = parseFloat(document.getElementById('dev-cents').value);
+    // formula: freq = base * 2^(cents/1200)
+    devOscNode.frequency.value = baseFreq * Math.pow(2, centsOffset / 1200);
+  }
+}
+
+devPlayBtn.addEventListener('click', () => {
+  if (!isAudioInitialized) initAudio();
+  
+  if (devOscNode) {
+    // Stop tone
+    devOscNode.stop();
+    devOscNode.disconnect();
+    devOscNode = null;
+    devPlayBtn.innerText = "PLAY TONE";
+    isNoteActive = false;
+  } else {
+    // Start tone
+    devOscNode = audioCtx.createOscillator();
+    devOscNode.type = 'sine'; // simulate brassish pure tone for easy tracking
+    updateDevTone();
+    devOscNode.connect(audioCtx.destination);
+    devOscNode.start();
+    devPlayBtn.innerText = "STOP TONE";
+    
+    // Feed the tuner loop manually while dev tone plays
+    function mockPitchLoop() {
+      if(!devOscNode) return;
+      const baseFreq = parseFloat(document.getElementById('dev-note').value);
+      const centsOffset = parseFloat(document.getElementById('dev-cents').value);
+      const targetFreq = baseFreq * Math.pow(2, centsOffset / 1200);
+      processFrequency(targetFreq);
+      requestAnimationFrame(mockPitchLoop);
+    }
+    mockPitchLoop();
+  }
+});
+</script>
+</body>
+</html>
