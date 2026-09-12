@@ -29,7 +29,7 @@
       color: var(--text-green);
       font-family: var(--ui-font);
       overflow: hidden;
-      touch-action: none; /* Prevents default pull-to-refresh */
+      touch-action: none;
     }
 
     * { box-sizing: border-box; }
@@ -94,7 +94,6 @@
       opacity: 0.8;
     }
 
-    /* Distinct Button Sizing */
     .btn-small { padding: 5px 8px; font-size: 0.9rem; }
     .btn-large { padding: 8px 12px; font-size: 1.1rem; font-weight: bold; }
     
@@ -108,7 +107,6 @@
     }
     .hacker-btn:active { background: var(--text-green); color: #000; }
     
-    /* Distinct BPM Input */
     .bpm-display {
       background: rgba(0, 0, 0, 0.8);
       color: #fff;
@@ -130,7 +128,7 @@
       font-family: inherit;
     }
 
-    /* Accent Bars */
+    /* Accent Bars with Numbers */
     #accent-bars { display: flex; gap: 8px; }
     .accent-bar {
       width: 35px;
@@ -139,10 +137,18 @@
       background: rgba(0, 255, 65, 0.1);
       cursor: pointer;
       transition: all 0.1s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 1.2rem;
+      color: var(--text-green);
     }
     .accent-bar.active { 
-      background: var(--text-green); 
-      box-shadow: var(--glow);
+      background: var(--sharp-pink); 
+      border-color: var(--sharp-pink);
+      color: #000;
+      box-shadow: 0 0 10px rgba(255, 20, 147, 0.6);
     }
 
     /* Tuner Canvas */
@@ -166,10 +172,10 @@
       pointer-events: none;
       z-index: 5;
     }
-    #flash-left { left: 0; background: linear-gradient(to right, rgba(0,255,65,0.7), transparent); }
-    #flash-right { right: 0; background: linear-gradient(to left, rgba(0,255,65,0.7), transparent); }
+    #flash-left { left: 0; }
+    #flash-right { right: 0; }
 
-    /* Dev Menu (Kept small and out of the way) */
+    /* Dev Menu */
     #dev-menu {
       position: absolute;
       bottom: 5px;
@@ -259,11 +265,11 @@ let bpm = 120;
 let beatsPerBar = 4;
 let beatNoteValue = 4;
 let accents = [true, false, false, false];
-let subdivisionType = 1; // 1=quarter, 2=eighth, 3=triplet, 4=16th
+let subdivisionType = 1; 
 let nextNoteTime = 0.0;
 let currentBeat = 0;
-let lookahead = 25.0; // ms
-let scheduleAheadTime = 0.1; // s
+let lookahead = 25.0; 
+let scheduleAheadTime = 0.1; 
 let timerID;
 
 // Tuner
@@ -274,13 +280,15 @@ let isNoteActive = false;
 let perfectTuneTimer = 0;
 const noteStrings = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
 
+// Wake Lock (Keeps screen awake)
+let wakeLock = null;
+
 // --- INITIALIZATION ---
 function initAudio() {
   if (isAudioInitialized) return;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   isAudioInitialized = true;
   
-  // CRITICAL FIX: Disable built-in mobile noise cancellation so it hears instruments
   const constraints = {
     audio: {
       echoCancellation: false,
@@ -301,7 +309,27 @@ function initAudio() {
   });
 }
 
-// Ensure audio context starts on first touch anywhere
+// Keep screen awake function
+async function updateWakeLock() {
+  const needsWakeLock = isPlaying || tunerActive;
+  if (needsWakeLock && !wakeLock && navigator.wakeLock) {
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+    } catch (err) {
+      console.warn(`Wake Lock error: ${err.message}`);
+    }
+  } else if (!needsWakeLock && wakeLock) {
+    await wakeLock.release();
+    wakeLock = null;
+  }
+}
+// Re-apply wake lock if tab becomes visible again
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && wakeLock === null) {
+    updateWakeLock();
+  }
+});
+
 document.body.addEventListener('pointerdown', initAudio, { once: true });
 
 // --- METRONOME AUDIO LOGIC ---
@@ -310,7 +338,6 @@ function playClick(time, type) {
   const osc = audioCtx.createOscillator();
   const envelope = audioCtx.createGain();
   
-  // Use square wave for a much louder, cutting click
   osc.type = 'square'; 
   
   if (type === 1) { // Accent
@@ -318,27 +345,30 @@ function playClick(time, type) {
     envelope.gain.value = 1.0; 
   } else if (type === 0) { // Normal
     osc.frequency.value = 800;
-    envelope.gain.value = 0.8;
-  } else { // Subdivision (quiet and short)
+    envelope.gain.value = 0.85; // Raised slightly
+  } else { // Subdivision 
     osc.frequency.value = 1500;
-    envelope.gain.value = 0.15;
+    envelope.gain.value = 0.45; // Significantly louder for visibility
   }
 
   osc.connect(envelope);
   envelope.connect(audioCtx.destination);
   
-  // Very fast attack, quick decay
   envelope.gain.setValueAtTime(envelope.gain.value, time);
-  const decayTime = (type === 2) ? 0.03 : 0.08; // Subs are shorter
+  const decayTime = (type === 2) ? 0.03 : 0.08; 
   envelope.gain.exponentialRampToValueAtTime(0.001, time + decayTime);
   
   osc.start(time);
   osc.stop(time + decayTime + 0.05);
 
-  // Flash logic (only on main beats, not subs)
+  // Dynamic Flash Colors (Green = Normal, Pink = Accent)
   if (type !== 2 && document.getElementById('flash-toggle').checked) {
     const delay = Math.max(0, (time - audioCtx.currentTime) * 1000);
     setTimeout(() => {
+      const color = (type === 1) ? '255, 20, 147' : '0, 255, 65'; 
+      document.getElementById('flash-left').style.background = `linear-gradient(to right, rgba(${color}, 0.7), transparent)`;
+      document.getElementById('flash-right').style.background = `linear-gradient(to left, rgba(${color}, 0.7), transparent)`;
+      
       document.getElementById('flash-left').style.opacity = '1';
       document.getElementById('flash-right').style.opacity = '1';
       setTimeout(() => {
@@ -358,11 +388,9 @@ function nextNote() {
 
 function scheduler() {
   while (nextNoteTime < audioCtx.currentTime + scheduleAheadTime) {
-    // 1. Schedule main beat
     const isAccent = accents[currentBeat];
     playClick(nextNoteTime, isAccent ? 1 : 0);
 
-    // 2. Schedule subdivisions if active
     if (subdivisionType > 1) {
       const secPerBeat = 60.0 / bpm;
       const subInterval = secPerBeat / subdivisionType;
@@ -370,7 +398,6 @@ function scheduler() {
         playClick(nextNoteTime + (i * subInterval), 2);
       }
     }
-    
     nextNote();
   }
   timerID = setTimeout(scheduler, lookahead);
@@ -391,6 +418,7 @@ function toggleMetronome() {
     clearTimeout(timerID);
   }
   updateBtnText();
+  updateWakeLock(); // Screen lock update
 }
 
 function updateBtnText() {
@@ -417,6 +445,7 @@ function renderAccentBars() {
   for(let i=0; i<beatsPerBar; i++) {
     const bar = document.createElement('div');
     bar.className = 'accent-bar' + (accents[i] ? ' active' : '');
+    bar.innerText = i + 1; // Add Beat Number
     bar.onclick = () => { accents[i] = !accents[i]; renderAccentBars(); };
     container.appendChild(bar);
   }
@@ -437,7 +466,6 @@ function parseCustomSig(val) {
 }
 renderAccentBars();
 
-// Gestures: Swipe Up / Down
 let touchStartY = 0;
 window.addEventListener('touchstart', e => { touchStartY = e.touches[0].clientY; }, {passive: true});
 window.addEventListener('touchend', e => {
@@ -445,10 +473,8 @@ window.addEventListener('touchend', e => {
   const deltaY = touchEndY - touchStartY;
   
   if (deltaY > 60 && !metroMenu.classList.contains('open') && touchStartY < window.innerHeight / 2) {
-    // Swipe down in top half of screen = open menu
     metroMenu.classList.add('open');
   } else if (deltaY < -60 && metroMenu.classList.contains('open')) {
-    // Swipe up anywhere = close menu
     metroMenu.classList.remove('open');
   }
 });
@@ -461,7 +487,6 @@ function autoCorrelate(buf, sampleRate) {
   for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
   rms = Math.sqrt(rms / SIZE);
   
-  // Lowered threshold to pick up quieter sounds
   if (rms < 0.002) return -1; 
 
   let r1 = 0, r2 = SIZE - 1, thres = 0.2;
@@ -523,7 +548,8 @@ resize();
 canvas.addEventListener('click', () => {
   if (!isAudioInitialized) initAudio();
   tunerActive = !tunerActive;
-  isNoteActive = false; // reset state
+  isNoteActive = false; 
+  updateWakeLock(); // Screen lock update
 });
 
 function drawOrb() {
@@ -532,91 +558,59 @@ function drawOrb() {
   
   const cx = cw / 2;
   const cy = ch / 2;
-  const baseRadius = Math.min(cw, ch) * 0.35; // slightly larger orb
+  const baseRadius = Math.min(cw, ch) * 0.35; 
   
-  // Paused State
   if (!tunerActive) {
-    ctx.beginPath();
-    ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 10;
-    ctx.stroke();
-    
-    ctx.font = 'bold 24px var(--ui-font)';
-    ctx.fillStyle = '#666';
+    ctx.beginPath(); ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 10; ctx.stroke();
+    ctx.font = 'bold 24px var(--ui-font)'; ctx.fillStyle = '#666';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText("TUNER PAUSED", cx, cy);
-    ctx.font = '14px var(--ui-font)';
-    ctx.fillText("(Tap to resume)", cx, cy + 30);
+    ctx.font = '14px var(--ui-font)'; ctx.fillText("(Tap to resume)", cx, cy + 30);
     return;
   }
 
-  // Idle State
   if (!isNoteActive) {
-    ctx.beginPath();
-    ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
-    ctx.strokeStyle = '#052205';
-    ctx.lineWidth = 10;
-    ctx.stroke();
-    
-    ctx.font = '18px var(--ui-font)';
-    ctx.fillStyle = '#005511';
+    ctx.beginPath(); ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = '#052205'; ctx.lineWidth = 10; ctx.stroke();
+    ctx.font = '18px var(--ui-font)'; ctx.fillStyle = '#005511';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText("LISTENING...", cx, cy);
     perfectTuneTimer = 0;
     return;
   }
 
-  // Active state
   let t = Math.min(1, Math.abs(currentCents) / 50); 
   
-  // Top Half (Sharp) - Pink
-  ctx.beginPath();
-  ctx.arc(cx, cy, baseRadius, Math.PI, 0);
-  ctx.lineWidth = 25;
-  ctx.strokeStyle = (currentCents > 2) ? `rgba(255, 20, 147, ${t + 0.2})` : '#052205';
+  ctx.beginPath(); ctx.arc(cx, cy, baseRadius, Math.PI, 0);
+  ctx.lineWidth = 25; ctx.strokeStyle = (currentCents > 2) ? `rgba(255, 20, 147, ${t + 0.2})` : '#052205';
   ctx.stroke();
 
-  // Bottom Half (Flat) - Orange
-  ctx.beginPath();
-  ctx.arc(cx, cy, baseRadius, 0, Math.PI);
-  ctx.lineWidth = 25;
-  ctx.strokeStyle = (currentCents < -2) ? `rgba(255, 140, 0, ${t + 0.2})` : '#052205';
+  ctx.beginPath(); ctx.arc(cx, cy, baseRadius, 0, Math.PI);
+  ctx.lineWidth = 25; ctx.strokeStyle = (currentCents < -2) ? `rgba(255, 140, 0, ${t + 0.2})` : '#052205';
   ctx.stroke();
   
-  // Perfect Tune Rings (Green)
   if (Math.abs(currentCents) <= 3) {
-    ctx.beginPath();
-    ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
-    ctx.lineWidth = 25;
-    ctx.strokeStyle = '#00ff41';
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
+    ctx.lineWidth = 25; ctx.strokeStyle = '#00ff41'; ctx.stroke();
     
-    // Pulse effect
     const pulse = baseRadius + (Math.sin(Date.now() / 100) * 10) + 15;
-    ctx.beginPath();
-    ctx.arc(cx, cy, pulse, 0, Math.PI*2);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(0, 255, 65, 0.5)';
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, pulse, 0, Math.PI*2);
+    ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0, 255, 65, 0.5)'; ctx.stroke();
   }
 
-  // MASSIVE Note Text
-  // Calculate a font size that fits the circle perfectly
-  const fontSize = baseRadius * 1.1; 
+  // MASSIVE Note Text (fills 75% of diameter)
+  const fontSize = baseRadius * 1.5; 
   ctx.font = `bold ${fontSize}px var(--ui-font)`;
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  
-  // Adjust Y slightly so the text is vertically centered properly
   ctx.fillText(currentNote, cx, cy + (fontSize * 0.05));
   
-  // Cents Text below Note
   ctx.font = '24px var(--ui-font)';
   let centText = (currentCents > 0 ? "+" : "") + currentCents + "c";
   ctx.fillStyle = (Math.abs(currentCents) <= 3) ? '#00ff41' : '#aaa';
-  ctx.fillText(centText, cx, cy + (baseRadius * 0.65));
+  ctx.fillText(centText, cx, cy + (baseRadius * 0.70));
 }
 drawOrb();
 
@@ -634,20 +628,15 @@ function updateDevTone() {
 
 devPlayBtn.addEventListener('click', () => {
   if (!isAudioInitialized) initAudio();
-  tunerActive = true; // force tuner on
+  tunerActive = true; 
+  updateWakeLock();
   
   if (devOscNode) {
-    devOscNode.stop();
-    devOscNode.disconnect();
-    devOscNode = null;
-    devPlayBtn.innerText = "TEST TONE";
-    isNoteActive = false;
+    devOscNode.stop(); devOscNode.disconnect(); devOscNode = null;
+    devPlayBtn.innerText = "TEST TONE"; isNoteActive = false;
   } else {
-    devOscNode = audioCtx.createOscillator();
-    devOscNode.type = 'sawtooth'; 
-    updateDevTone();
-    devOscNode.connect(audioCtx.destination);
-    devOscNode.start();
+    devOscNode = audioCtx.createOscillator(); devOscNode.type = 'sawtooth'; 
+    updateDevTone(); devOscNode.connect(audioCtx.destination); devOscNode.start();
     devPlayBtn.innerText = "STOP TONE";
     
     function mockPitchLoop() {
@@ -656,7 +645,6 @@ devPlayBtn.addEventListener('click', () => {
       const centsOffset = parseFloat(document.getElementById('dev-cents').value);
       const targetFreq = baseFreq * Math.pow(2, centsOffset / 1200);
       
-      // Simulate tuner math
       isNoteActive = true;
       const noteNum = Math.round(12 * (Math.log(targetFreq / 440) / Math.log(2))) + 69;
       currentNote = noteStrings[noteNum % 12];
