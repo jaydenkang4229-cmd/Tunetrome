@@ -21,7 +21,6 @@
       padding: 0;
       height: 100%;
       background-color: var(--bg-color);
-      /* Cool hacker grid background */
       background-image: 
         linear-gradient(rgba(0, 255, 65, 0.05) 1px, transparent 1px),
         linear-gradient(90deg, rgba(0, 255, 65, 0.05) 1px, transparent 1px);
@@ -174,18 +173,6 @@
     }
     #flash-left { left: 0; }
     #flash-right { right: 0; }
-
-    /* Dev Menu */
-    #dev-menu {
-      position: absolute;
-      bottom: 5px;
-      right: 5px;
-      border: 1px dashed var(--border-green);
-      padding: 8px;
-      background: rgba(0,0,0,0.9);
-      font-size: 0.7rem;
-      z-index: 20;
-    }
   </style>
 </head>
 <body>
@@ -244,16 +231,6 @@
     <canvas id="orb-canvas"></canvas>
   </div>
 
-  <!-- Dev Menu -->
-  <div id="dev-menu">
-    <select id="dev-note" class="hacker-select" style="width:80px; margin-bottom: 2px;">
-      <option value="116.54">Bb2</option>
-      <option value="440">A4</option>
-    </select><br>
-    <input type="range" id="dev-cents" min="-50" max="50" value="0" oninput="updateDevTone();"><br>
-    <button id="dev-play" class="hacker-btn btn-small" style="width: 100%;">TEST TONE</button>
-  </div>
-
 <script>
 // --- GLOBALS ---
 let audioCtx, analyser, micStream;
@@ -278,9 +255,10 @@ let currentNote = "";
 let currentCents = 0;
 let isNoteActive = false;
 let perfectTuneTimer = 0;
+let tunerMuteEndTime = 0; // Used to micro-mute mic during metronome clicks
 const noteStrings = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
 
-// Wake Lock (Keeps screen awake)
+// Wake Lock
 let wakeLock = null;
 
 // --- INITIALIZATION ---
@@ -323,7 +301,6 @@ async function updateWakeLock() {
     wakeLock = null;
   }
 }
-// Re-apply wake lock if tab becomes visible again
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && wakeLock === null) {
     updateWakeLock();
@@ -334,7 +311,6 @@ document.body.addEventListener('pointerdown', initAudio, { once: true });
 
 // --- METRONOME AUDIO LOGIC ---
 function playClick(time, type) {
-  // type: 0 = normal beat, 1 = accented beat, 2 = subdivision
   const osc = audioCtx.createOscillator();
   const envelope = audioCtx.createGain();
   
@@ -345,10 +321,10 @@ function playClick(time, type) {
     envelope.gain.value = 1.0; 
   } else if (type === 0) { // Normal
     osc.frequency.value = 800;
-    envelope.gain.value = 0.85; // Raised slightly
+    envelope.gain.value = 0.85; 
   } else { // Subdivision 
     osc.frequency.value = 1500;
-    envelope.gain.value = 0.45; // Significantly louder for visibility
+    envelope.gain.value = 0.45; 
   }
 
   osc.connect(envelope);
@@ -361,7 +337,11 @@ function playClick(time, type) {
   osc.start(time);
   osc.stop(time + decayTime + 0.05);
 
-  // Dynamic Flash Colors (Green = Normal, Pink = Accent)
+  // Micro-mute the tuner so it doesn't pick up the speaker click
+  // Add a 150ms buffer for the sound to physically decay in the room
+  tunerMuteEndTime = Math.max(tunerMuteEndTime, time + decayTime + 0.15);
+
+  // Dynamic Flash Colors
   if (type !== 2 && document.getElementById('flash-toggle').checked) {
     const delay = Math.max(0, (time - audioCtx.currentTime) * 1000);
     setTimeout(() => {
@@ -418,7 +398,7 @@ function toggleMetronome() {
     clearTimeout(timerID);
   }
   updateBtnText();
-  updateWakeLock(); // Screen lock update
+  updateWakeLock();
 }
 
 function updateBtnText() {
@@ -445,7 +425,7 @@ function renderAccentBars() {
   for(let i=0; i<beatsPerBar; i++) {
     const bar = document.createElement('div');
     bar.className = 'accent-bar' + (accents[i] ? ' active' : '');
-    bar.innerText = i + 1; // Add Beat Number
+    bar.innerText = i + 1;
     bar.onclick = () => { accents[i] = !accents[i]; renderAccentBars(); };
     container.appendChild(bar);
   }
@@ -515,7 +495,12 @@ function autoCorrelate(buf, sampleRate) {
 
 function updatePitch() {
   requestAnimationFrame(updatePitch);
-  if (!tunerActive || !analyser || devOscNode) return; 
+  if (!tunerActive || !analyser) return; 
+
+  // micro-mute logic: skip audio analysis if we are in the middle of a metronome beep
+  if (audioCtx.currentTime < tunerMuteEndTime) {
+    return; // skips updating the note, freezing it seamlessly for a fraction of a second
+  }
 
   const buf = new Float32Array(2048);
   analyser.getFloatTimeDomainData(buf);
@@ -549,7 +534,7 @@ canvas.addEventListener('click', () => {
   if (!isAudioInitialized) initAudio();
   tunerActive = !tunerActive;
   isNoteActive = false; 
-  updateWakeLock(); // Screen lock update
+  updateWakeLock();
 });
 
 function drawOrb() {
@@ -599,7 +584,7 @@ function drawOrb() {
     ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0, 255, 65, 0.5)'; ctx.stroke();
   }
 
-  // MASSIVE Note Text (fills 75% of diameter)
+  // MASSIVE Note Text
   const fontSize = baseRadius * 1.5; 
   ctx.font = `bold ${fontSize}px var(--ui-font)`;
   ctx.fillStyle = '#fff';
@@ -614,47 +599,6 @@ function drawOrb() {
 }
 drawOrb();
 
-// --- DEV MENU OSCILLATOR ---
-let devOscNode = null;
-const devPlayBtn = document.getElementById('dev-play');
-
-function updateDevTone() {
-  if (devOscNode) {
-    const baseFreq = parseFloat(document.getElementById('dev-note').value);
-    const centsOffset = parseFloat(document.getElementById('dev-cents').value);
-    devOscNode.frequency.value = baseFreq * Math.pow(2, centsOffset / 1200);
-  }
-}
-
-devPlayBtn.addEventListener('click', () => {
-  if (!isAudioInitialized) initAudio();
-  tunerActive = true; 
-  updateWakeLock();
-  
-  if (devOscNode) {
-    devOscNode.stop(); devOscNode.disconnect(); devOscNode = null;
-    devPlayBtn.innerText = "TEST TONE"; isNoteActive = false;
-  } else {
-    devOscNode = audioCtx.createOscillator(); devOscNode.type = 'sawtooth'; 
-    updateDevTone(); devOscNode.connect(audioCtx.destination); devOscNode.start();
-    devPlayBtn.innerText = "STOP TONE";
-    
-    function mockPitchLoop() {
-      if(!devOscNode) return;
-      const baseFreq = parseFloat(document.getElementById('dev-note').value);
-      const centsOffset = parseFloat(document.getElementById('dev-cents').value);
-      const targetFreq = baseFreq * Math.pow(2, centsOffset / 1200);
-      
-      isNoteActive = true;
-      const noteNum = Math.round(12 * (Math.log(targetFreq / 440) / Math.log(2))) + 69;
-      currentNote = noteStrings[noteNum % 12];
-      currentCents = Math.round(centsOffset);
-      
-      requestAnimationFrame(mockPitchLoop);
-    }
-    mockPitchLoop();
-  }
-});
 </script>
 </body>
 </html>
