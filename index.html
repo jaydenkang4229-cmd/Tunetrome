@@ -35,21 +35,18 @@
       font-family: var(--ui-font);
       overflow: hidden;
       touch-action: none;
-      /* Prevents text selection when tapping fast */
       -webkit-user-select: none;
       user-select: none;
     }
 
     * { box-sizing: border-box; }
 
-    /* Metronome Interface */
     #metro-container {
       position: absolute;
       top: 0;
       left: 0;
       width: 100%;
       z-index: 10;
-      /* Safe area spacing for modern iPhones with notches/dynamic islands */
       padding-top: env(safe-area-inset-top); 
     }
 
@@ -138,7 +135,6 @@
       font-family: inherit;
     }
 
-    /* Accent Bars with Numbers */
     #accent-bars { display: flex; gap: 8px; }
     .accent-bar {
       width: 35px;
@@ -161,7 +157,6 @@
       box-shadow: 0 0 10px rgba(255, 20, 147, 0.6);
     }
 
-    /* Tuner Canvas */
     #tuner-screen {
       position: absolute;
       top: 0;
@@ -184,6 +179,18 @@
     }
     #flash-left { left: 0; }
     #flash-right { right: 0; }
+
+    /* Version Display */
+    #version-display {
+      position: absolute;
+      bottom: 8px;
+      left: 8px;
+      color: var(--text-green);
+      font-size: 12px;
+      opacity: 0.5;
+      z-index: 20;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -234,9 +241,10 @@
     <button id="metro-btn" onclick="toggleMetronome()">[ METRONOME: 120 BPM - OFF ]</button>
   </div>
 
-  <!-- Edge Flashes -->
+  <!-- Edge Flashes & Version -->
   <div id="flash-left" class="flash-side"></div>
   <div id="flash-right" class="flash-side"></div>
+  <div id="version-display">v1</div>
 
   <!-- Tuner Interface -->
   <div id="tuner-screen">
@@ -244,7 +252,7 @@
   </div>
 
 <script>
-// --- GLOBALS ---
+//// --- GLOBALS ---
 let audioCtx, analyser, micStream;
 let isAudioInitialized = false;
 
@@ -273,7 +281,7 @@ const noteStrings = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb",
 // Wake Lock
 let wakeLock = null;
 
-// --- INITIALIZATION ---
+//// --- INITIALIZATION ---
 function initAudio() {
   if (isAudioInitialized) return;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -299,14 +307,12 @@ function initAudio() {
   });
 }
 
-// Keep screen awake function (Updated for iOS robustness)
 async function updateWakeLock() {
   const needsWakeLock = isPlaying || tunerActive;
   
   if (needsWakeLock && !wakeLock && navigator.wakeLock) {
     try {
       wakeLock = await navigator.wakeLock.request('screen');
-      // iOS kills the lock when backgrounded, so we listen for release to reset our variable
       wakeLock.addEventListener('release', () => {
         wakeLock = null;
       });
@@ -319,25 +325,22 @@ async function updateWakeLock() {
   }
 }
 
-// iOS recovery when returning from another app (e.g., YouTube)
+// iOS recovery when returning from another app
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    // 1. Kickstart Apple's audio engine if it suspended while in background
     if (audioCtx && audioCtx.state === 'suspended') {
       audioCtx.resume();
     }
-    // 2. Re-acquire the screen wake lock
     updateWakeLock();
   }
 });
 
 document.body.addEventListener('pointerdown', () => {
   initAudio();
-  // Double-check audio state on random taps just in case iOS got stuck
   if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-}, { once: false }); // Changed to false so touches always try to heal audio on iOS
+}, { once: false });
 
-// --- METRONOME AUDIO LOGIC ---
+//// --- METRONOME AUDIO LOGIC ---
 function playClick(time, type) {
   const osc = audioCtx.createOscillator();
   const envelope = audioCtx.createGain();
@@ -408,7 +411,7 @@ function scheduler() {
   timerID = setTimeout(scheduler, lookahead);
 }
 
-// --- METRONOME UI & GESTURES ---
+//// --- METRONOME UI & GESTURES ---
 const metroMenu = document.getElementById('metro-menu');
 const metroBtn = document.getElementById('metro-btn');
 
@@ -485,7 +488,7 @@ window.addEventListener('touchend', e => {
 });
 function closeMenu() { metroMenu.classList.remove('open'); }
 
-// --- TUNER LOGIC ---
+//// --- TUNER LOGIC ---
 function autoCorrelate(buf, sampleRate) {
   let SIZE = buf.length;
   let rms = 0;
@@ -541,7 +544,7 @@ function updatePitch() {
   }
 }
 
-// --- CANVAS RENDER (The Orb) ---
+//// --- CANVAS RENDER (The Orb) ---
 const canvas = document.getElementById('orb-canvas');
 const ctx = canvas.getContext('2d');
 let cw, ch;
@@ -572,19 +575,30 @@ function drawOrb() {
   if (!tunerActive) {
     ctx.beginPath(); ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
     ctx.strokeStyle = '#333'; ctx.lineWidth = 10; ctx.stroke();
-    ctx.font = 'bold 24px var(--ui-font)'; ctx.fillStyle = '#666';
+    
+    // Dynamic size for paused text
+    const pauseSize = baseRadius * 0.35;
+    ctx.font = `bold ${pauseSize}px var(--ui-font)`; 
+    ctx.fillStyle = '#666';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText("TUNER PAUSED", cx, cy);
-    ctx.font = '14px var(--ui-font)'; ctx.fillText("(Tap to resume)", cx, cy + 30);
+    ctx.fillText("PAUSED", cx, cy - (pauseSize * 0.2));
+    
+    ctx.font = `${pauseSize * 0.4}px var(--ui-font)`; 
+    ctx.fillText("(Tap to resume)", cx, cy + (pauseSize * 0.8));
     return;
   }
 
   if (!isNoteActive) {
     ctx.beginPath(); ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
     ctx.strokeStyle = '#052205'; ctx.lineWidth = 10; ctx.stroke();
-    ctx.font = '18px var(--ui-font)'; ctx.fillStyle = '#005511';
+    
+    // Dynamic size for listening text
+    const listenSize = baseRadius * 0.3;
+    ctx.font = `bold ${listenSize}px var(--ui-font)`; 
+    ctx.fillStyle = '#005511';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText("LISTENING...", cx, cy);
+    
     perfectTuneTimer = 0;
     return;
   }
@@ -608,18 +622,19 @@ function drawOrb() {
     ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0, 255, 65, 0.5)'; ctx.stroke();
   }
 
-  // MASSIVE Note Text
-  const fontSize = baseRadius * 2.4; 
+  // MASSIVE Note Text (Dynamic sizing based on radius)
+  const fontSize = baseRadius * 2.5; 
   ctx.font = `bold ${fontSize}px var(--ui-font)`;
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(currentNote, cx, cy + (fontSize * 0.05));
   
-  ctx.font = '24px var(--ui-font)';
+  const centSize = baseRadius * 0.3;
+  ctx.font = `${centSize}px var(--ui-font)`;
   let centText = (currentCents > 0 ? "+" : "") + currentCents + "c";
   ctx.fillStyle = (Math.abs(currentCents) <= 3) ? '#00ff41' : '#aaa';
-  ctx.fillText(centText, cx, cy + (baseRadius * 0.85));
+  ctx.fillText(centText, cx, cy + (baseRadius * 0.80));
 }
 drawOrb();
 
