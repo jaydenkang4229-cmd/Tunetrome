@@ -244,7 +244,7 @@
   <!-- Edge Flashes & Version -->
   <div id="flash-left" class="flash-side"></div>
   <div id="flash-right" class="flash-side"></div>
-  <div id="version-display">v1</div>
+  <div id="version-display">v2</div>
 
   <!-- Tuner Interface -->
   <div id="tuner-screen">
@@ -576,15 +576,15 @@ function drawOrb() {
     ctx.beginPath(); ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
     ctx.strokeStyle = '#333'; ctx.lineWidth = 10; ctx.stroke();
     
-    // Dynamic size for paused text
-    const pauseSize = baseRadius * 0.35;
+    // Dynamic size for paused text, made much larger
+    const pauseSize = baseRadius * 1.2;
     ctx.font = `bold ${pauseSize}px var(--ui-font)`; 
     ctx.fillStyle = '#666';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText("PAUSED", cx, cy - (pauseSize * 0.2));
     
-    ctx.font = `${pauseSize * 0.4}px var(--ui-font)`; 
-    ctx.fillText("(Tap to resume)", cx, cy + (pauseSize * 0.8));
+    ctx.font = `${pauseSize * 0.3}px var(--ui-font)`; 
+    ctx.fillText("(Tap to resume)", cx, cy + (pauseSize * 0.6));
     return;
   }
 
@@ -592,8 +592,8 @@ function drawOrb() {
     ctx.beginPath(); ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
     ctx.strokeStyle = '#052205'; ctx.lineWidth = 10; ctx.stroke();
     
-    // Dynamic size for listening text
-    const listenSize = baseRadius * 0.3;
+    // Dynamic size for listening text, made much larger
+    const listenSize = baseRadius * 1.0;
     ctx.font = `bold ${listenSize}px var(--ui-font)`; 
     ctx.fillStyle = '#005511';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -622,15 +622,15 @@ function drawOrb() {
     ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0, 255, 65, 0.5)'; ctx.stroke();
   }
 
-  // MASSIVE Note Text (Dynamic sizing based on radius)
-  const fontSize = baseRadius * 2.5; 
+  // MASSIVE Note Text (Dynamic sizing based on radius, scaled up further)
+  const fontSize = baseRadius * 4.5; 
   ctx.font = `bold ${fontSize}px var(--ui-font)`;
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(currentNote, cx, cy + (fontSize * 0.05));
   
-  const centSize = baseRadius * 0.3;
+  const centSize = baseRadius * 1.0;
   ctx.font = `${centSize}px var(--ui-font)`;
   let centText = (currentCents > 0 ? "+" : "") + currentCents + "c";
   ctx.fillStyle = (Math.abs(currentCents) <= 3) ? '#00ff41' : '#aaa';
