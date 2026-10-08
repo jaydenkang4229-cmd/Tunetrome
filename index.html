@@ -608,20 +608,18 @@ function drawOrb() {
     ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0, 255, 65, 0.5)'; ctx.stroke();
   }
 
-  // WAY BIGGER Note Text
-  // Increased from 1.5 to 1.9 so it covers most of the inside
-  const fontSize = baseRadius * 1.9; 
+  // MASSIVE Note Text
+  const fontSize = baseRadius * 2.4; 
   ctx.font = `bold ${fontSize}px var(--ui-font)`;
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(currentNote, cx, cy + (fontSize * 0.05));
   
-  ctx.font = 'bold 24px var(--ui-font)';
+  ctx.font = '24px var(--ui-font)';
   let centText = (currentCents > 0 ? "+" : "") + currentCents + "c";
   ctx.fillStyle = (Math.abs(currentCents) <= 3) ? '#00ff41' : '#aaa';
-  // Lowered the cents text just a tiny bit so it doesn't overlap the huge letter
-  ctx.fillText(centText, cx, cy + (baseRadius * 0.75));
+  ctx.fillText(centText, cx, cy + (baseRadius * 0.85));
 }
 drawOrb();
 
