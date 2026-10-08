@@ -2,7 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  
+  <!-- Apple App / PWA Meta Tags -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Tuner & Metro">
+  
   <title>Trombone Tuner & Metronome</title>
   <style>
     /* --- Cyberpunk / 2000s Hacker Style --- */
@@ -29,6 +35,9 @@
       font-family: var(--ui-font);
       overflow: hidden;
       touch-action: none;
+      /* Prevents text selection when tapping fast */
+      -webkit-user-select: none;
+      user-select: none;
     }
 
     * { box-sizing: border-box; }
@@ -40,6 +49,8 @@
       left: 0;
       width: 100%;
       z-index: 10;
+      /* Safe area spacing for modern iPhones with notches/dynamic islands */
+      padding-top: env(safe-area-inset-top); 
     }
 
     #metro-btn {
@@ -54,7 +65,6 @@
       cursor: pointer;
       font-family: inherit;
       box-shadow: var(--glow);
-      user-select: none;
       backdrop-filter: blur(4px);
     }
 
@@ -64,6 +74,7 @@
       background: rgba(2, 6, 2, 0.95);
       border-bottom: 2px solid var(--border-green);
       padding: 20px;
+      padding-top: max(20px, env(safe-area-inset-top));
       transform: translateY(-100%);
       transition: transform 0.3s cubic-bezier(0.1, 0.8, 0.3, 1);
       position: absolute;
@@ -196,6 +207,7 @@
 
       <div class="menu-label">TIME SIGNATURE & SUBDIVISIONS</div>
       <div class="menu-row">
+        <button class="hacker-btn btn-small" onclick="setTimeSig(2,4)">2/4</button>
         <button class="hacker-btn btn-small" onclick="setTimeSig(3,4)">3/4</button>
         <button class="hacker-btn btn-small" onclick="setTimeSig(4,4)">4/4</button>
         <button class="hacker-btn btn-small" onclick="setTimeSig(6,8)">6/8</button>
@@ -255,7 +267,7 @@ let currentNote = "";
 let currentCents = 0;
 let isNoteActive = false;
 let perfectTuneTimer = 0;
-let tunerMuteEndTime = 0; // Used to micro-mute mic during metronome clicks
+let tunerMuteEndTime = 0;
 const noteStrings = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
 
 // Wake Lock
@@ -287,12 +299,17 @@ function initAudio() {
   });
 }
 
-// Keep screen awake function
+// Keep screen awake function (Updated for iOS robustness)
 async function updateWakeLock() {
   const needsWakeLock = isPlaying || tunerActive;
+  
   if (needsWakeLock && !wakeLock && navigator.wakeLock) {
     try {
       wakeLock = await navigator.wakeLock.request('screen');
+      // iOS kills the lock when backgrounded, so we listen for release to reset our variable
+      wakeLock.addEventListener('release', () => {
+        wakeLock = null;
+      });
     } catch (err) {
       console.warn(`Wake Lock error: ${err.message}`);
     }
@@ -301,13 +318,24 @@ async function updateWakeLock() {
     wakeLock = null;
   }
 }
+
+// iOS recovery when returning from another app (e.g., YouTube)
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && wakeLock === null) {
+  if (document.visibilityState === 'visible') {
+    // 1. Kickstart Apple's audio engine if it suspended while in background
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+    // 2. Re-acquire the screen wake lock
     updateWakeLock();
   }
 });
 
-document.body.addEventListener('pointerdown', initAudio, { once: true });
+document.body.addEventListener('pointerdown', () => {
+  initAudio();
+  // Double-check audio state on random taps just in case iOS got stuck
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+}, { once: false }); // Changed to false so touches always try to heal audio on iOS
 
 // --- METRONOME AUDIO LOGIC ---
 function playClick(time, type) {
@@ -337,11 +365,8 @@ function playClick(time, type) {
   osc.start(time);
   osc.stop(time + decayTime + 0.05);
 
-  // Micro-mute the tuner so it doesn't pick up the speaker click
-  // Add a 150ms buffer for the sound to physically decay in the room
   tunerMuteEndTime = Math.max(tunerMuteEndTime, time + decayTime + 0.15);
 
-  // Dynamic Flash Colors
   if (type !== 2 && document.getElementById('flash-toggle').checked) {
     const delay = Math.max(0, (time - audioCtx.currentTime) * 1000);
     setTimeout(() => {
@@ -497,9 +522,8 @@ function updatePitch() {
   requestAnimationFrame(updatePitch);
   if (!tunerActive || !analyser) return; 
 
-  // micro-mute logic: skip audio analysis if we are in the middle of a metronome beep
   if (audioCtx.currentTime < tunerMuteEndTime) {
-    return; // skips updating the note, freezing it seamlessly for a fraction of a second
+    return; 
   }
 
   const buf = new Float32Array(2048);
@@ -584,18 +608,20 @@ function drawOrb() {
     ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0, 255, 65, 0.5)'; ctx.stroke();
   }
 
-  // MASSIVE Note Text
-  const fontSize = baseRadius * 1.5; 
+  // WAY BIGGER Note Text
+  // Increased from 1.5 to 1.9 so it covers most of the inside
+  const fontSize = baseRadius * 1.9; 
   ctx.font = `bold ${fontSize}px var(--ui-font)`;
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(currentNote, cx, cy + (fontSize * 0.05));
   
-  ctx.font = '24px var(--ui-font)';
+  ctx.font = 'bold 24px var(--ui-font)';
   let centText = (currentCents > 0 ? "+" : "") + currentCents + "c";
   ctx.fillStyle = (Math.abs(currentCents) <= 3) ? '#00ff41' : '#aaa';
-  ctx.fillText(centText, cx, cy + (baseRadius * 0.70));
+  // Lowered the cents text just a tiny bit so it doesn't overlap the huge letter
+  ctx.fillText(centText, cx, cy + (baseRadius * 0.75));
 }
 drawOrb();
 
